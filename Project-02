@@ -1,0 +1,394 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef char Element;
+#define EMPTY '\0'
+#define MAX_HEIGHT 24
+
+static void skip_ws(const char **p) {
+    while (**p == ' ' || **p == '\t') (*p)++;
+}
+
+static int is_label(char c) {
+    return c != '\0' && c != '(' && c != ')' && c != ',' && c != ' ' &&
+           c != '\t' && c != '\n' && c != '\r';
+}
+
+typedef struct {
+    Element *a;
+    int cap;
+    int err;
+} ArrTree;
+
+static long arr_steps;
+
+static int arr_grow(ArrTree *t, int idx) {
+    if (idx >= (1 << MAX_HEIGHT)) { t->err = 1; return 0; }
+    if (idx < t->cap) return 1;
+    int ncap = t->cap ? t->cap : 16;
+    while (ncap <= idx) ncap *= 2;
+    Element *na = realloc(t->a, ncap * sizeof(Element));
+    if (!na) { t->err = 1; return 0; }
+    memset(na + t->cap, 0, (ncap - t->cap) * sizeof(Element));
+    t->a = na;
+    t->cap = ncap;
+    return 1;
+}
+
+static void arr_parse_node(ArrTree *t, const char **p, int idx) {
+    skip_ws(p);
+    if (!is_label(**p)) { t->err = 1; return; }
+    if (!arr_grow(t, idx)) return;
+    t->a[idx] = **p;
+    (*p)++;
+    skip_ws(p);
+    if (**p != '(') return;
+    (*p)++;
+    skip_ws(p);
+    if (is_label(**p)) { arr_parse_node(t, p, 2 * idx); if (t->err) return; }
+    skip_ws(p);
+    if (**p == ',') {
+        (*p)++;
+        skip_ws(p);
+        if (is_label(**p)) { arr_parse_node(t, p, 2 * idx + 1); if (t->err) return; }
+    }
+    skip_ws(p);
+    if (**p != ')') { t->err = 1; return; }
+    (*p)++;
+}
+
+static int arr_height(const ArrTree *t);
+static int arr_build(ArrTree *t, const char *s) {
+    t->a = NULL; t->cap = 0; t->err = 0;
+    const char *p = s;
+    arr_parse_node(t, &p, 1);
+    skip_ws(&p);
+    if (t->err || *p != '\0') return 0;
+    int h = arr_height(t);
+    int need = 1 << h;
+    if (t->cap > need) {
+        t->a = realloc(t->a, need * sizeof(Element));
+        t->cap = need;
+    }
+    return 1;
+}
+
+static int arr_last_index(const ArrTree *t) {
+    for (int i = t->cap - 1; i >= 1; i--)
+        if (t->a[i] != EMPTY) return i;
+    return 0;
+}
+
+static int arr_height(const ArrTree *t) {
+    int last = arr_last_index(t), h = 0;
+    while (last > 0) { h++; last >>= 1; }
+    return h;
+}
+
+static int arr_get(const ArrTree *t, int i) {
+    return (i >= 1 && i < t->cap) ? t->a[i] != EMPTY : 0;
+}
+
+static void arr_print_rec(const ArrTree *t, int i, int depth) {
+    if (!arr_get(t, i)) return;
+    arr_print_rec(t, 2 * i + 1, depth + 1);
+    printf("%*s%c\n", depth * 4, "", t->a[i]);
+    arr_print_rec(t, 2 * i, depth + 1);
+}
+
+static int arr_count(const ArrTree *t) {
+    int n = 0;
+    for (int i = 1; i < t->cap; i++) if (t->a[i] != EMPTY) n++;
+    return n;
+}
+
+static int arr_leaves(const ArrTree *t) {
+    int n = 0;
+    for (int i = 1; i < t->cap; i++)
+        if (arr_get(t, i) && !arr_get(t, 2 * i) && !arr_get(t, 2 * i + 1)) n++;
+    return n;
+}
+
+static int arr_degree(const ArrTree *t) {
+    int d = 0;
+    for (int i = 1; i < t->cap; i++)
+        if (arr_get(t, i)) {
+            int c = arr_get(t, 2 * i) + arr_get(t, 2 * i + 1);
+            if (c > d) d = c;
+        }
+    return d;
+}
+
+static int arr_is_complete(const ArrTree *t) {
+    return arr_last_index(t) == arr_count(t);
+}
+
+static int arr_is_full(const ArrTree *t) {
+    return arr_count(t) == (1 << arr_height(t)) - 1;
+}
+
+static int arr_skew(const ArrTree *t) {
+    int n = arr_count(t);
+    if (n < 2 || arr_height(t) != n) return 0;
+    int left = 1, right = 1;
+    for (int i = 1; i < t->cap; i++)
+        if (arr_get(t, i)) {
+            if (arr_get(t, 2 * i + 1)) left = 0;
+            if (arr_get(t, 2 * i)) right = 0;
+        }
+    return left ? 1 : right ? 2 : 0;
+}
+
+static size_t arr_memory(const ArrTree *t) {
+    return sizeof(ArrTree) + t->cap * sizeof(Element);
+}
+
+static int arr_find(const ArrTree *t, Element x) {
+    for (int i = 1; i < t->cap; i++) {
+        arr_steps++;
+        if (t->a[i] == x) return i;
+    }
+    return 0;
+}
+
+static void arr_relations(const ArrTree *t, Element x) {
+    arr_steps = 0;
+    int i = arr_find(t, x);
+    if (!i) { printf("  [배열] 노드 %c 없음\n", x); return; }
+    printf("  [배열] %c: ", x);
+
+    arr_steps++;
+    if (arr_get(t, 2 * i)) printf("왼쪽자식=%c ", t->a[2 * i]); else printf("왼쪽자식=없음 ");
+    if (arr_get(t, 2 * i + 1)) printf("오른쪽자식=%c ", t->a[2 * i + 1]); else printf("오른쪽자식=없음 ");
+    if (i > 1) printf("부모=%c ", t->a[i / 2]); else printf("부모=없음 ");
+    if (i > 1 && arr_get(t, i ^ 1)) printf("형제=%c", t->a[i ^ 1]); else printf("형제=없음");
+    printf("\n         (접근 횟수: 노드 찾기 + 관계 계산 = %ld)\n", arr_steps);
+}
+
+typedef struct Node {
+    Element data;
+    struct Node *left, *right;
+} Node;
+
+static long lnk_steps;
+
+static Node *new_node(Element c) {
+    Node *n = calloc(1, sizeof(Node));
+    n->data = c;
+    return n;
+}
+
+static void free_tree(Node *r) {
+    if (!r) return;
+    free_tree(r->left);
+    free_tree(r->right);
+    free(r);
+}
+
+static Node *lnk_parse_node(const char **p, int *err) {
+    skip_ws(p);
+    if (!is_label(**p)) { *err = 1; return NULL; }
+    Node *n = new_node(**p);
+    (*p)++;
+    skip_ws(p);
+    if (**p != '(') return n;
+    (*p)++;
+    skip_ws(p);
+    if (is_label(**p)) { n->left = lnk_parse_node(p, err); if (*err) return n; }
+    skip_ws(p);
+    if (**p == ',') {
+        (*p)++;
+        skip_ws(p);
+        if (is_label(**p)) { n->right = lnk_parse_node(p, err); if (*err) return n; }
+    }
+    skip_ws(p);
+    if (**p != ')') { *err = 1; return n; }
+    (*p)++;
+    return n;
+}
+
+static Node *lnk_build(const char *s) {
+    const char *p = s;
+    int err = 0;
+    Node *r = lnk_parse_node(&p, &err);
+    skip_ws(&p);
+    if (err || *p != '\0') { free_tree(r); return NULL; }
+    return r;
+}
+
+static void lnk_print_rec(const Node *n, int depth) {
+    if (!n) return;
+    lnk_print_rec(n->right, depth + 1);
+    printf("%*s%c\n", depth * 4, "", n->data);
+    lnk_print_rec(n->left, depth + 1);
+}
+
+static int lnk_count(const Node *n) {
+    return n ? 1 + lnk_count(n->left) + lnk_count(n->right) : 0;
+}
+
+static int lnk_leaves(const Node *n) {
+    if (!n) return 0;
+    if (!n->left && !n->right) return 1;
+    return lnk_leaves(n->left) + lnk_leaves(n->right);
+}
+
+static int lnk_height(const Node *n) {
+    if (!n) return 0;
+    int l = lnk_height(n->left), r = lnk_height(n->right);
+    return 1 + (l > r ? l : r);
+}
+
+static int lnk_degree(const Node *n) {
+    if (!n) return 0;
+    int d = (n->left != NULL) + (n->right != NULL);
+    int l = lnk_degree(n->left), r = lnk_degree(n->right);
+    if (l > d) d = l;
+    if (r > d) d = r;
+    return d;
+}
+
+static int lnk_is_complete(Node *root) {
+    int n = lnk_count(root);
+    Node **q = malloc(sizeof(Node *) * (2 * n + 2));
+    int head = 0, tail = 0, seen_null = 0, ok = 1;
+    q[tail++] = root;
+    while (head < tail) {
+        Node *cur = q[head++];
+        if (!cur) { seen_null = 1; continue; }
+        if (seen_null) { ok = 0; break; }
+        q[tail++] = cur->left;
+        q[tail++] = cur->right;
+    }
+    free(q);
+    return ok;
+}
+
+static int lnk_is_full(const Node *root) {
+    return lnk_count(root) == (1 << lnk_height(root)) - 1;
+}
+
+static int lnk_skew(const Node *root) {
+    if (lnk_count(root) < 2) return 0;
+    int left = 1, right = 1;
+    for (const Node *c = root; c; ) {
+        if (c->left && c->right) return 0;
+        if (c->right) left = 0;
+        if (c->left) right = 0;
+        c = c->left ? c->left : c->right;
+    }
+    return left ? 1 : right ? 2 : 0;
+}
+
+static size_t lnk_memory(const Node *root) {
+    return (size_t)lnk_count(root) * sizeof(Node);
+}
+
+static Node *lnk_find(Node *n, Element x) {
+    if (!n) return NULL;
+    lnk_steps++;
+    if (n->data == x) return n;
+    Node *r = lnk_find(n->left, x);
+    return r ? r : lnk_find(n->right, x);
+}
+
+static Node *lnk_find_parent(Node *n, const Node *child) {
+    if (!n) return NULL;
+    lnk_steps++;
+    if (n->left == child || n->right == child) return n;
+    Node *r = lnk_find_parent(n->left, child);
+    return r ? r : lnk_find_parent(n->right, child);
+}
+
+static void lnk_relations(Node *root, Element x) {
+    lnk_steps = 0;
+    Node *n = lnk_find(root, x);
+    if (!n) { printf("  [연결] 노드 %c 없음\n", x); return; }
+    long find_steps = lnk_steps;
+    printf("  [연결] %c: ", x);
+    lnk_steps++;
+    if (n->left) printf("왼쪽자식=%c ", n->left->data); else printf("왼쪽자식=없음 ");
+    if (n->right) printf("오른쪽자식=%c ", n->right->data); else printf("오른쪽자식=없음 ");
+    long before = lnk_steps;
+    Node *par = (n == root) ? NULL : lnk_find_parent(root, n);
+    long parent_steps = lnk_steps - before;
+    if (par) printf("부모=%c ", par->data); else printf("부모=없음 ");
+    if (par) {
+        Node *sib = (par->left == n) ? par->right : par->left;
+        if (sib) printf("형제=%c", sib->data); else printf("형제=없음");
+    } else printf("형제=없음");
+    printf("\n         (접근 횟수: 노드 찾기 %ld + 자식 1 + 부모 탐색 %ld = %ld)\n",
+           find_steps, parent_steps, lnk_steps);
+}
+
+static const char *yes_no(int v) { return v ? "예" : "아니오"; }
+
+static void print_shape(int complete, int full, int skew) {
+    printf("  완전 이진트리 : %s\n", yes_no(complete));
+    printf("  포화 이진트리 : %s\n", yes_no(full));
+    printf("  편향 이진트리 : %s%s\n", yes_no(skew),
+           skew == 1 ? " (왼쪽 편향)" : skew == 2 ? " (오른쪽 편향)" : "");
+}
+
+int main(void) {
+    char line[4096];
+    printf("이진트리 입력 (예: A(B(D,E),C(,F))): ");
+    if (!fgets(line, sizeof line, stdin)) return 1;
+    line[strcspn(line, "\r\n")] = '\0';
+
+    ArrTree at;
+    Node *root = lnk_build(line);
+    if (!root || !arr_build(&at, line)) {
+        printf("입력 형식 오류 (또는 높이 %d 초과)\n", MAX_HEIGHT);
+        free_tree(root);
+        return 1;
+    }
+
+    printf("\n================ 1. 배열 이진트리 ================\n");
+    printf("[1] 트리 출력\n");
+    arr_print_rec(&at, 1, 0);
+    printf("[2] 트리 정보\n");
+    printf("  전체 노드 수    : %d\n", arr_count(&at));
+    printf("  단말 노드 수    : %d\n", arr_leaves(&at));
+    printf("  비단말 노드 수  : %d\n", arr_count(&at) - arr_leaves(&at));
+    printf("  트리 높이       : %d\n", arr_height(&at));
+    printf("  트리 차수       : %d\n", arr_degree(&at));
+    printf("[3] 형태 판별\n");
+    print_shape(arr_is_complete(&at), arr_is_full(&at), arr_skew(&at));
+
+    printf("\n============= 2. 연결 자료구조 이진트리 =============\n");
+    printf("[1] 트리 출력\n");
+    lnk_print_rec(root, 0);
+    printf("[2] 트리 정보\n");
+    printf("  전체 노드 수    : %d\n", lnk_count(root));
+    printf("  단말 노드 수    : %d\n", lnk_leaves(root));
+    printf("  비단말 노드 수  : %d\n", lnk_count(root) - lnk_leaves(root));
+    printf("  트리 높이       : %d\n", lnk_height(root));
+    printf("  트리 차수       : %d\n", lnk_degree(root));
+    printf("[3] 형태 판별\n");
+    print_shape(lnk_is_complete(root), lnk_is_full(root), lnk_skew(root));
+
+    printf("\n================ 3. 비교 ================\n");
+    printf("[1] 메모리 사용량 (sizeof(Element)=%zu, sizeof(Node)=%zu)\n",
+           sizeof(Element), sizeof(Node));
+    size_t am = arr_memory(&at), lm = lnk_memory(root);
+    printf("  배열   : 슬롯 %d개 (사용 %d개, 낭비 %d개) -> %zu 바이트\n",
+           at.cap - 1, arr_count(&at), (at.cap - 1) - arr_count(&at), am);
+    printf("  연결   : 노드 %d개 x %zu -> %zu 바이트\n",
+           lnk_count(root), sizeof(Node), lm);
+    printf("  (배열은 ArrTree 구조체 %zu 바이트 포함, malloc 헤더는 제외)\n", sizeof(ArrTree));
+
+    printf("[2] 자식/부모/형제 조회 (종료: 빈 줄)\n");
+    for (;;) {
+        printf("  노드 입력> ");
+        if (!fgets(line, sizeof line, stdin)) break;
+        if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0') break;
+        arr_relations(&at, line[0]);
+        lnk_relations(root, line[0]);
+    }
+
+    free(at.a);
+    free_tree(root);
+    return 0;
+}
